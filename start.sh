@@ -11,13 +11,25 @@ function log() {
    echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") [controller] [${level}] ${msg}"
 }
 
-if ((TOR_INSTANCES < 1 || TOR_INSTANCES > 40)); then
-   log "fatal" "Environment variable TOR_INSTANCES has to be within the range of 1...40"
+function send_signal_newnym() {
+   local ctrl_port=$1
+   local password=$2
+   echo -e "authenticate \"${password}\"\nsignal newnym" | nc 127.0.0.1 "${ctrl_port}" >/dev/null 2>&1
+   if [[ $? -ne 0 ]]; then
+      log "error" "Failed to authenticate on ControlPort ${ctrl_port}"
+      return 1
+   fi
+   log "Circuit successfully rebuilt on ControlPort ${ctrl_port}"
+   return 0
+}
+
+if ((TOR_INSTANCES < 1 || TOR_INSTANCES > 150)); then
+   log "fatal" "Environment variable TOR_INSTANCES has to be within the range of 1...150"
    exit 1
 fi
 
-if ((TOR_REBUILD_INTERVAL < 600)); then
-   log "fatal" "Environment variable TOR_REBUILD_INTERVAL has to be bigger than 600 seconds"
+if ((TOR_REBUILD_INTERVAL < 6)); then
+   log "fatal" "Environment variable TOR_REBUILD_INTERVAL has to be bigger than 6 seconds"
    # otherwise AWS may complain about it, because http://checkip.amazonaws.com is asked too often
    exit 2
 fi
@@ -25,6 +37,12 @@ fi
 base_tor_socks_port=10000
 base_tor_ctrl_port=20000
 base_http_port=30000
+hash_control_password="16:C5D18CCFB98DC8BC60F933C9C63CA75309B0851A86D422953BE9038F2F"
+control_password="my_password" # Set this to match your Tor ControlPort config
+PROXIED_URL=${PROXIED_URL:-"https://www.google.com/search?q=hello+world"}
+
+sed -i "s,PROXIED_URL=.*,PROXIED_URL=${PROXIED_URL}," /var/lib/haproxy/check_proxy.sh
+
 
 log "Start creating a pool of ${TOR_INSTANCES} tor instances..."
 
@@ -43,6 +61,7 @@ for ((i = 0; i < TOR_INSTANCES; i++)); do
    (tor --PidFile "${tor_data_dir}/tor.pid" \
       --SocksPort 127.0.0.1:"${socks_port}" \
       --ControlPort 127.0.0.1:"${ctrl_port}" \
+      --HashedControlPassword "${hash_control_password}" \
       --dataDirectory "${tor_data_dir}" 2>&1 |
       sed -r "s/^(\w+\ [0-9 :\.]+)(\[.*)[\r\n]?$/$(date -u +"%Y-%m-%dT%H:%M:%SZ") [tor#${i}] \2/") &
    #
@@ -88,7 +107,13 @@ while :; do
    log "Rebuilding all the tor circuits..."
    for ((i = 0; i < TOR_INSTANCES; i++)); do
       http_port=$((base_http_port + i))
-      IP=$(curl -sx "http://127.0.0.1:${http_port}" http://checkip.amazonaws.com)
-      log "Current external IP address of proxy #${i}/${TOR_INSTANCES}: ${IP}"
+      response=$(/usr/bin/curl -x "127.0.0.1:${http_port}" -s -o /dev/null -w "%{http_code}" "$PROXIED_URL" -m1)
+      if [ "$response" -ne 200 ]; then
+	  log "Reloading TOR instance ${i}"
+          ctrl_port=$((base_tor_ctrl_port + i))
+          send_signal_newnym "${ctrl_port}" "${control_password}"
+          IP=$(curl -sx "http://127.0.0.1:${http_port}" http://checkip.amazonaws.com)
+          log "Current external IP address of proxy #${i}/${TOR_INSTANCES}: ${IP}"
+      fi
    done
 done

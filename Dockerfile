@@ -9,6 +9,7 @@ ENV \
 EXPOSE 3128/tcp 4444/tcp
 
 COPY tor.cfg privoxy.cfg haproxy.cfg start.sh bom.sh /
+COPY check_proxy.sh /var/lib/haproxy/
 
 RUN apk --no-cache --no-progress --quiet upgrade && \
     # alpine has a POSIX sed from busybox, for the log re-formatting, GNU sed is required to converting a capture group to lowercase
@@ -24,6 +25,8 @@ RUN apk --no-cache --no-progress --quiet upgrade && \
     chown -R tor: /var/local/tor && \
     mkdir -p /var/local/privoxy && \
     chown -R privoxy: /var/local/privoxy && \
+    chown haproxy: /var/lib/haproxy/check_proxy.sh && \
+    chmod +x /var/lib/haproxy/check_proxy.sh && \
     #
     # cleanup
     #
