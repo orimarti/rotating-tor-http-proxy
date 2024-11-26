@@ -1,3 +1,9 @@
+Modification that allows to change dinamically the proxies where the IP has been burned.
+
+Only pass as param to docker: PROXIED_URL=https://www.google.com/search?q=hello+world (as an example) and
+haproxy will check the proxies that works for this URL and it'll restart the ones not working.
+
+
 ![GitHub](https://img.shields.io/github/license/zhaow-de/rotating-tor-http-proxy)
 ![Docker Image Version (latest semver)](https://img.shields.io/docker/v/zhaowde/rotating-tor-http-proxy?sort=semver)
 ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/zhaow-de/rotating-tor-http-proxy/auto-upgrade.yml)
