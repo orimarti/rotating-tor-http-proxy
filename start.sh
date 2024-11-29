@@ -40,8 +40,9 @@ base_http_port=30000
 hash_control_password="16:C5D18CCFB98DC8BC60F933C9C63CA75309B0851A86D422953BE9038F2F"
 control_password="my_password" # Set this to match your Tor ControlPort config
 PROXIED_URL=${PROXIED_URL:-"https://www.google.com/search?q=hello+world"}
-
+MAX_TIMEOUT=${MAX_TIMEOUT:-1}
 sed -i "s,PROXIED_URL=.*,PROXIED_URL=${PROXIED_URL}," /var/lib/haproxy/check_proxy.sh
+sed -i "s,MAX_TIMEOUT=.*,MAX_TIMEOUT=${MAX_TIMEOUT}," /var/lib/haproxy/check_proxy.sh
 
 
 log "Start creating a pool of ${TOR_INSTANCES} tor instances..."
