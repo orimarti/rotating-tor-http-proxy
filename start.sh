@@ -118,8 +118,21 @@ while :; do
    sleep "$((TOR_REBUILD_INTERVAL))"
    log "Checking backends and rebuilding circuits for failing instances..."
    for ((i = 0; i < TOR_INSTANCES; i++)); do
-      if ! check_backend_status "$i"; then
-         log "info" "Backend ${i} is failing, rebuilding circuit..."
+      # Check backend three times before deciding it's failing
+      failed_checks=0
+      for ((check = 0; check < 3; check++)); do
+         if ! check_backend_status "$i"; then
+            failed_checks=$((failed_checks + 1))
+         else
+            break  # If it passes, no need to continue checking
+         fi
+         if [ $check -lt 2 ]; then
+            sleep 1  # Small delay between checks
+         fi
+      done
+      
+      if [ $failed_checks -eq 3 ]; then
+         log "info" "Backend ${i} failed all 3 checks, rebuilding circuit..."
          ctrl_port=$((base_tor_ctrl_port + i))
          send_signal_newnym "${ctrl_port}" "${control_password}"
          http_port=$((base_http_port + i))
@@ -127,7 +140,7 @@ while :; do
          IP=$(curl -sx "http://127.0.0.1:${http_port}" -s http://checkip.amazonaws.com 2>/dev/null || echo "unknown")
          log "Current external IP address of proxy #${i}/${TOR_INSTANCES}: ${IP}"
       else
-         log "info" "Backend ${i} is healthy, skipping rebuild"
+         log "info" "Backend ${i} is healthy (passed check), skipping rebuild"
       fi
    done
 done
