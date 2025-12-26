@@ -8,7 +8,7 @@ function log() {
       level=$1
       msg=$2
    fi
-   echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") [controller] [${level}] ${msg}"
+   echo "[START] $(date -u +"%Y-%m-%dT%H:%M:%SZ") [controller] [${level}] ${msg}"
 }
 
 function send_signal_newnym() {
@@ -21,6 +21,18 @@ function send_signal_newnym() {
    fi
    log "Circuit successfully rebuilt on ControlPort ${ctrl_port}"
    return 0
+}
+
+function check_backend_status() {
+   local instance_id=$1
+   local http_port=$((base_http_port + instance_id))
+   local response=$(/usr/bin/curl -x "127.0.0.1:${http_port}" -s -o /dev/null -w "%{http_code}" "$PROXIED_URL" -m2 2>/dev/null)
+   
+   if [ "$response" -eq 200 ] 2>/dev/null; then
+      return 0
+   else
+      return 1
+   fi
 }
 
 if ((TOR_INSTANCES < 1 || TOR_INSTANCES > 150)); then
@@ -40,6 +52,7 @@ base_http_port=30000
 hash_control_password="16:C5D18CCFB98DC8BC60F933C9C63CA75309B0851A86D422953BE9038F2F"
 control_password="my_password" # Set this to match your Tor ControlPort config
 PROXIED_URL=${PROXIED_URL:-"https://www.google.com/search?q=hello+world"}
+echo "[START] $PROXIED_URL"
 MAX_TIMEOUT=${MAX_TIMEOUT:-1}
 sed -i "s,PROXIED_URL=.*,PROXIED_URL=${PROXIED_URL}," /var/lib/haproxy/check_proxy.sh
 sed -i "s,MAX_TIMEOUT=.*,MAX_TIMEOUT=${MAX_TIMEOUT}," /var/lib/haproxy/check_proxy.sh
@@ -98,23 +111,23 @@ done
 # request to "activate" the HAProxy
 log "Wait 15 seconds to build the first Tor circuit"
 sleep 15
-curl -sx "http://127.0.0.1:3128" https://google.com >/dev/null
-#
-# endless loop to reset circuits
-#
+
+# Main loop: periodic circuit rebuilds - only rebuild failing instances
 while :; do
-   log "Wait ${TOR_REBUILD_INTERVAL} seconds to rebuild all the tor circuits"
+   log "Wait ${TOR_REBUILD_INTERVAL} seconds before next circuit rebuild cycle"
    sleep "$((TOR_REBUILD_INTERVAL))"
-   log "Rebuilding all the tor circuits..."
+   log "Checking backends and rebuilding circuits for failing instances..."
    for ((i = 0; i < TOR_INSTANCES; i++)); do
-      http_port=$((base_http_port + i))
-      response=$(/usr/bin/curl -x "127.0.0.1:${http_port}" -s -o /dev/null -w "%{http_code}" "$PROXIED_URL" -m1)
-      if [ "$response" -ne 200 ]; then
-	  log "Reloading TOR instance ${i}"
-          ctrl_port=$((base_tor_ctrl_port + i))
-          send_signal_newnym "${ctrl_port}" "${control_password}"
-          IP=$(curl -sx "http://127.0.0.1:${http_port}" http://checkip.amazonaws.com)
-          log "Current external IP address of proxy #${i}/${TOR_INSTANCES}: ${IP}"
+      if ! check_backend_status "$i"; then
+         log "info" "Backend ${i} is failing, rebuilding circuit..."
+         ctrl_port=$((base_tor_ctrl_port + i))
+         send_signal_newnym "${ctrl_port}" "${control_password}"
+         http_port=$((base_http_port + i))
+         sleep 1
+         IP=$(curl -sx "http://127.0.0.1:${http_port}" -s http://checkip.amazonaws.com 2>/dev/null || echo "unknown")
+         log "Current external IP address of proxy #${i}/${TOR_INSTANCES}: ${IP}"
+      else
+         log "info" "Backend ${i} is healthy, skipping rebuild"
       fi
    done
 done
